@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Subway Surfers</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
+</head>
+<body class="bg-black overflow-hidden select-none">
+    <div id="game-container" class="relative w-full h-screen max-w-[520px] mx-auto overflow-hidden">
+        
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas" class="absolute inset-0 w-full h-full"></canvas>
+
+        <!-- ============ LOADING SCREEN ============ -->
+        <div id="loading-screen" class="screen active">
+            <div class="absolute inset-0 bg-gradient-to-b from-purple-900 via-indigo-900 to-black flex flex-col items-center justify-center">
+                <div class="mb-8">
+                    <h1 class="game-title text-5xl sm:text-6xl leading-none">SUBWAY</h1>
+                    <h1 class="game-title text-6xl sm:text-7xl leading-none -mt-1">SURFERS</h1>
+                </div>
+                <div class="loading-bar-container">
+                    <div id="loading-bar" class="loading-bar"></div>
+                </div>
+                <p class="text-white/60 text-sm mt-4 font-poppins">Loading...</p>
+            </div>
+        </div>
+
+        <!-- ============ HOME SCREEN ============ -->
+        <div id="home-screen" class="screen">
+            <div class="absolute inset-0 home-bg"></div>
+            <div class="relative z-10 flex flex-col items-center justify-between h-full py-6 px-4">
+                <!-- Title -->
+                <div class="mt-6 sm:mt-10 text-center">
+                    <h1 class="game-title text-5xl sm:text-6xl leading-none animate-title-bounce">SUBWAY</h1>
+                    <h1 class="game-title text-6xl sm:text-7xl leading-none -mt-1 animate-title-bounce-delay">SURFERS</h1>
+                    <p class="text-white/50 text-xs mt-2 font-poppins tracking-widest uppercase">Web Edition</p>
+                </div>
+
+                <!-- Character Preview Area -->
+                <div class="flex-1 flex items-center justify-center my-4">
+                    <div class="character-preview-ring">
+                        <canvas id="charPreviewCanvas" width="160" height="220"></canvas>
+                    </div>
+                </div>
+
+                <!-- Stats Bar -->
+                <div class="w-full max-w-xs mb-3">
+                    <div class="flex justify-between items-center bg-black/40 backdrop-blur-sm rounded-2xl px-5 py-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">🏆</span>
+                            <div>
+                                <div class="text-white/50 text-[10px] uppercase tracking-wider font-poppins">Best</div>
+                                <div id="home-highscore" class="text-white font-bold text-lg font-poppins leading-tight">0</div>
+                            </div>
+                        </div>
+                        <div class="w-px h-8 bg-white/20"></div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">🪙</span>
+                            <div>
+                                <div class="text-white/50 text-[10px] uppercase tracking-wider font-poppins">Coins</div>
+                                <div id="home-coins" class="text-yellow-400 font-bold text-lg font-poppins leading-tight">0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Buttons -->
+                <div class="flex flex-col items-center gap-3 mb-6 w-full max-w-xs">
+                    <button id="play-btn" class="play-button w-full py-4 text-2xl font-bold">
+                        PLAY
+                    </button>
+                    <div class="flex gap-3 w-full">
+                        <button id="chars-btn" class="secondary-button flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
+                            <span>👤</span> Characters
+                        </button>
+                        <button id="sound-btn" class="secondary-button flex-1 py-2.5 text-sm flex items-center justify-center gap-2">
+                            <span id="sound-icon">🔊</span> Sound
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ CHARACTER SELECT SCREEN ============ -->
+        <div id="char-screen" class="screen">
+            <div class="absolute inset-0 bg-gradient-to-b from-purple-900/95 via-indigo-900/95 to-black/95 backdrop-blur-sm"></div>
+            <div class="relative z-10 flex flex-col items-center h-full py-6 px-4">
+                <h2 class="game-title text-3xl mb-6">CHARACTERS</h2>
+                
+                <div id="char-grid" class="grid grid-cols-2 gap-4 w-full max-w-xs flex-1 overflow-y-auto py-4">
+                    <!-- Characters populated by JS -->
+                </div>
+
+                <button id="char-back-btn" class="secondary-button px-10 py-3 mt-4 text-base">
+                    ← Back
+                </button>
+            </div>
+        </div>
+
+        <!-- ============ GAME HUD ============ -->
+        <div id="game-hud" class="screen" style="pointer-events: none;">
+            <div class="absolute top-0 left-0 right-0 p-3 sm:p-4 flex justify-between items-start" style="pointer-events: auto;">
+                <!-- Left: Coins -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="hud-pill flex items-center gap-1.5">
+                        <span class="text-lg">🪙</span>
+                        <span id="hud-coins" class="text-white font-bold text-base font-poppins">0</span>
+                    </div>
+                    <div id="powerup-indicator" class="hud-pill hidden text-xs">
+                        <span id="powerup-icon">⚡</span>
+                        <span id="powerup-name" class="text-white font-poppins">Power</span>
+                        <div id="powerup-bar" class="powerup-timer-bar"></div>
+                    </div>
+                </div>
+
+                <!-- Center: Score -->
+                <div class="flex flex-col items-center">
+                    <div id="hud-score" class="text-white font-bold text-3xl font-poppins drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">0</div>
+                    <div id="hud-multiplier" class="hidden text-yellow-400 font-bold text-sm font-poppins animate-pulse">×2 SCORE</div>
+                </div>
+
+                <!-- Right: Pause -->
+                <button id="pause-btn" class="hud-pill w-10 h-10 flex items-center justify-center text-lg">
+                    ⏸
+                </button>
+            </div>
+
+            <!-- Swipe Tutorial (shown first game) -->
+            <div id="swipe-tutorial" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div class="bg-black/50 backdrop-blur-sm rounded-2xl p-6 text-center text-white font-poppins animate-fade-in-out">
+                    <p class="text-lg font-bold mb-2">Swipe to Play!</p>
+                    <p class="text-sm text-white/70">← → to switch lanes</p>
+                    <p class="text-sm text-white/70">↑ to jump · ↓ to slide</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ PAUSE SCREEN ============ -->
+        <div id="pause-screen" class="screen">
+            <div class="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center">
+                <h2 class="game-title text-4xl mb-8">PAUSED</h2>
+                <div class="flex flex-col gap-3 w-64">
+                    <button id="resume-btn" class="play-button w-full py-3 text-xl font-bold">
+                        ▶ Resume
+                    </button>
+                    <button id="pause-sound-btn" class="secondary-button w-full py-3 text-base">
+                        <span id="pause-sound-icon">🔊</span> Sound
+                    </button>
+                    <button id="pause-home-btn" class="secondary-button w-full py-3 text-base">
+                        🏠 Home
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ GAME OVER SCREEN ============ -->
+        <div id="gameover-screen" class="screen">
+            <div class="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center px-4">
+                <h2 class="game-title text-5xl mb-2 animate-crash-in">GAME</h2>
+                <h2 class="game-title text-5xl mb-6 animate-crash-in-delay">OVER</h2>
+
+                <!-- Score Summary Card -->
+                <div class="bg-white/10 backdrop-blur-md rounded-3xl p-6 w-full max-w-xs mb-6">
+                    <div class="text-center mb-4">
+                        <div class="text-white/50 text-xs uppercase tracking-wider font-poppins">Score</div>
+                        <div id="go-score" class="text-white font-bold text-4xl font-poppins">0</div>
+                    </div>
+                    <div class="flex justify-around">
+                        <div class="text-center">
+                            <div class="text-white/50 text-[10px] uppercase tracking-wider font-poppins">Coins</div>
+                            <div class="flex items-center gap-1 justify-center">
+                                <span>🪙</span>
+                                <span id="go-coins" class="text-yellow-400 font-bold text-lg font-poppins">0</span>
+                            </div>
+                        </div>
+                        <div class="w-px bg-white/20"></div>
+                        <div class="text-center">
+                            <div class="text-white/50 text-[10px] uppercase tracking-wider font-poppins">Best</div>
+                            <div class="flex items-center gap-1 justify-center">
+                                <span>🏆</span>
+                                <span id="go-best" class="text-white font-bold text-lg font-poppins">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="new-best" class="hidden text-center mt-3">
+                        <span class="new-best-badge">✨ NEW BEST! ✨</span>
+                    </div>
+                </div>
+
+                <!-- Buttons -->
+                <div class="flex flex-col gap-3 w-full max-w-xs">
+                    <button id="retry-btn" class="play-button w-full py-3 text-xl font-bold">
+                        🔄 Play Again
+                    </button>
+                    <button id="go-home-btn" class="secondary-button w-full py-3 text-base">
+                        🏠 Home
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="js/game.js"></script>
+</body>
+</html>
