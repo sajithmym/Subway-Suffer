@@ -10,36 +10,36 @@
 //  CONFIGURATION
 // ────────────────────────────────────────────
 const CONFIG = {
-    // Camera & Projection
-    CAMERA_DEPTH: 140,
-    HORIZON_RATIO: 0.32,
-    GROUND_RATIO: 0.95,
-    DRAW_DISTANCE: 280,
+    // Camera & Projection (lower depth = more dramatic perspective)
+    CAMERA_DEPTH: 60,
+    HORIZON_RATIO: 0.33,
+    GROUND_RATIO: 0.93,
+    DRAW_DISTANCE: 200,
 
     // Road / Lanes
     LANE_COUNT: 3,
-    ROAD_WIDTH_FACTOR: 0.24,
-    UNIT_HEIGHT_FACTOR: 0.17,
+    ROAD_WIDTH_FACTOR: 0.30,
+    UNIT_HEIGHT_FACTOR: 0.12,
 
     // Speed (world units per second)
-    INITIAL_SPEED: 65,
-    MAX_SPEED: 200,
-    SPEED_INCREMENT: 0.4,
+    INITIAL_SPEED: 60,
+    MAX_SPEED: 180,
+    SPEED_INCREMENT: 0.35,
 
     // Player
-    JUMP_HEIGHT: 2.4,
-    JUMP_DURATION: 0.6,
+    JUMP_HEIGHT: 2.2,
+    JUMP_DURATION: 0.55,
     SLIDE_DURATION: 0.5,
     LANE_SWITCH_SPEED: 10,
 
-    // Objects (world units)
+    // Objects (world units) — trains are proportional subway cars, not walls
     TRAIN_LENGTH_MIN: 8,
-    TRAIN_LENGTH_MAX: 22,
-    TRAIN_HEIGHT: 3.5,
-    TRAIN_WIDTH: 0.72,
-    BARRIER_HEIGHT: 0.9,
-    BARRIER_HIGH_Y: 1.2,
-    BARRIER_WIDTH: 0.9,
+    TRAIN_LENGTH_MAX: 20,
+    TRAIN_HEIGHT: 2.2,
+    TRAIN_WIDTH: 0.62,
+    BARRIER_HEIGHT: 0.65,
+    BARRIER_HIGH_Y: 1.1,
+    BARRIER_WIDTH: 0.55,
 
     // Collectibles
     COIN_HEIGHT: 1.2,
@@ -47,10 +47,10 @@ const CONFIG = {
     COIN_VALUE: 1,
 
     // Spawning
-    SPAWN_AHEAD: 280,
+    SPAWN_AHEAD: 220,
     SPAWN_GAP_MIN: 28,
-    SPAWN_GAP_MAX: 48,
-    POWERUP_CHANCE: 0.06,
+    SPAWN_GAP_MAX: 52,
+    POWERUP_CHANCE: 0.07,
 
     // Power-up durations (seconds)
     MAGNET_DURATION: 8,
@@ -65,7 +65,7 @@ const CONFIG = {
     GROUND_LIGHT: '#32323a',
     RAIL_COLOR: '#7a7a88',
     TIE_COLOR: '#5a4a3a',
-    TRAIN_COLORS: ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#e67e22','#1abc9c','#e84393'],
+    TRAIN_COLORS: ['#3a7ca5','#5b8c78','#c0392b','#2874a6','#717d7e','#5d6d7e','#839192','#b7950b'],
     BUILDING_COLORS: ['#1a1a2e','#16213e','#0f3460','#1a1a40','#2c2c54','#1e1e3f'],
     COIN_COLOR: '#ffd700',
     BARRIER_COLOR: '#e8b830',
@@ -334,15 +334,19 @@ class Barrier {
         this.lane = lane;
         this.x = lane - 1;
         this.z = z;
-        this.type = type || 'low';
+        this.type = type || 'low'; // 'low' = jump over, 'high' = slide under
         this.width = CONFIG.BARRIER_WIDTH;
-        this.height = this.type === 'low' ? CONFIG.BARRIER_HEIGHT : 2.8;
+        // Low barrier: small hurdle you jump over
+        // High barrier: overhead beam you slide under (gap underneath)
+        this.height = this.type === 'low' ? CONFIG.BARRIER_HEIGHT : 2.6;
     }
     getHitbox() {
         if (this.type === 'high') {
-            return { x: this.x-this.width/2, y: CONFIG.BARRIER_HIGH_Y, z: this.z, width: this.width, height: 1.6, depth: 0.8 };
+            // The beam part that kills you — elevated, slide under it
+            return { x: this.x - this.width/2, y: CONFIG.BARRIER_HIGH_Y, z: this.z, width: this.width, height: 1.3, depth: 0.6 };
         }
-        return { x: this.x-this.width/2, y: 0, z: this.z, width: this.width, height: this.height, depth: 0.8 };
+        // Low barrier on the ground — jump over it
+        return { x: this.x - this.width/2, y: 0, z: this.z, width: this.width, height: this.height, depth: 0.6 };
     }
 }
 
@@ -407,60 +411,106 @@ class WorldGenerator {
         this.cleanup();
     }
 
+    // Check if a lane is free of trains/barriers at a Z range
+    isLaneFreeAt(lane, zStart, zEnd) {
+        for (const t of this.trains) {
+            if (t.lane === lane && t.z < zEnd + 3 && t.z + t.length > zStart - 3) return false;
+        }
+        for (const b of this.barriers) {
+            if (b.lane === lane && b.z > zStart - 3 && b.z < zEnd + 3) return false;
+        }
+        return true;
+    }
+
+    // Get all lanes that are free at a Z range
+    getFreeLanesAt(zStart, zEnd) {
+        return [0, 1, 2].filter(l => this.isLaneFreeAt(l, zStart, zEnd));
+    }
+
     spawnPattern() {
         const z = this.nextSpawnZ;
         const r = Math.random();
+        const trainLen = rand(CONFIG.TRAIN_LENGTH_MIN, CONFIG.TRAIN_LENGTH_MAX);
 
-        if (r < 0.25) {
-            // Single train
-            const lane = randInt(0, 2);
-            this.trains.push(new Train(lane, z));
-            this.spawnCoinLine((lane + randInt(1,2)) % 3, z, z + 8);
-        } else if (r < 0.45) {
-            // Double train - leave one lane free
-            const free = randInt(0, 2);
-            for (let l = 0; l < 3; l++) {
-                if (l !== free) this.trains.push(new Train(l, z, rand(8, 14)));
+        // Check which lanes are available (prevents all-lanes-blocked)
+        const freeLanes = this.getFreeLanesAt(z, z + trainLen);
+        if (freeLanes.length === 0) return; // Safety: never create impossible situations
+
+        if (r < 0.25 && freeLanes.length >= 2) {
+            // ── Single train on one lane ──
+            const tLane = randChoice(freeLanes);
+            this.trains.push(new Train(tLane, z, trainLen));
+            const coinCandidates = freeLanes.filter(l => l !== tLane);
+            if (coinCandidates.length > 0) this.spawnCoinLine(randChoice(coinCandidates), z, z + 10);
+
+        } else if (r < 0.42 && freeLanes.length >= 3) {
+            // ── Two trains side-by-side, one gap ──
+            const free = randChoice(freeLanes);
+            const blocked = freeLanes.filter(l => l !== free);
+            const len = rand(10, 18);
+            for (const l of blocked) this.trains.push(new Train(l, z, len));
+            this.spawnCoinLine(free, z, z + 8);
+
+        } else if (r < 0.55 && freeLanes.length >= 2) {
+            // ── Staggered trains (zigzag) — different lanes, offset in Z ──
+            const l1 = randChoice(freeLanes);
+            const remaining = freeLanes.filter(l => l !== l1);
+            const l2 = randChoice(remaining);
+            const len1 = rand(8, 16);
+            const offset = len1 + rand(4, 12);
+            const len2 = rand(8, 16);
+            this.trains.push(new Train(l1, z, len1));
+            this.trains.push(new Train(l2, z + offset, len2));
+            const coinLane = [0, 1, 2].find(l => l !== l1 && l !== l2);
+            if (coinLane !== undefined) this.spawnCoinLine(coinLane, z + 3, z + offset - 2);
+
+        } else if (r < 0.68 && freeLanes.length >= 2) {
+            // ── Train + barrier on adjacent lane ──
+            const tLane = randChoice(freeLanes);
+            this.trains.push(new Train(tLane, z, rand(8, 16)));
+            const bCandidates = freeLanes.filter(l => l !== tLane);
+            if (bCandidates.length > 0) {
+                const bLane = randChoice(bCandidates);
+                this.barriers.push(new Barrier(bLane, z + rand(2, 5), Math.random() > 0.5 ? 'low' : 'high'));
+                const coinCandidates = bCandidates.filter(l => l !== bLane);
+                if (coinCandidates.length > 0) this.spawnCoinLine(randChoice(coinCandidates), z, z + 8);
             }
-            this.spawnCoinLine(free, z, z + 6);
-        } else if (r < 0.6) {
-            // Barrier row
-            const free = randInt(0, 2);
-            const type = Math.random() > 0.5 ? 'low' : 'high';
-            for (let l = 0; l < 3; l++) {
-                if (l !== free) this.barriers.push(new Barrier(l, z, type));
-            }
-            this.spawnCoinLine(free, z - 3, z + 3);
-        } else if (r < 0.75) {
-            // Train + barrier combo
-            const tLane = randInt(0, 2);
-            this.trains.push(new Train(tLane, z, rand(10, 16)));
-            const bLane = (tLane + 1) % 3;
-            this.barriers.push(new Barrier(bLane, z + rand(3, 6), Math.random()>0.5?'low':'high'));
-            this.spawnCoinLine((tLane + 2) % 3, z, z + 8);
-        } else if (r < 0.88) {
-            // Staggered trains
-            const l1 = randInt(0, 2);
-            const l2 = (l1 + randInt(1,2)) % 3;
-            this.trains.push(new Train(l1, z, rand(10, 18)));
-            this.trains.push(new Train(l2, z + rand(15, 25), rand(10, 18)));
-            // Coins between them
-            const freeLane = [0,1,2].find(l => l !== l1 && l !== l2);
-            if (freeLane !== undefined) this.spawnCoinLine(freeLane, z + 5, z + 15);
+
+        } else if (r < 0.78) {
+            // ── Single low barrier (hurdle) ──
+            const lane = randChoice(freeLanes);
+            this.barriers.push(new Barrier(lane, z, 'low'));
+            this.spawnCoinArc(lane, z + 3);
+
+        } else if (r < 0.86) {
+            // ── Single high barrier (slide under) ──
+            const lane = randChoice(freeLanes);
+            this.barriers.push(new Barrier(lane, z, 'high'));
+            this.spawnCoinLine(lane, z + 3, z + 8);
+
+        } else if (r < 0.93 && freeLanes.length >= 2) {
+            // ── Two barriers staggered in Z on different lanes ──
+            const l1 = randChoice(freeLanes);
+            const remaining = freeLanes.filter(l => l !== l1);
+            const l2 = randChoice(remaining);
+            this.barriers.push(new Barrier(l1, z, Math.random() > 0.5 ? 'low' : 'high'));
+            this.barriers.push(new Barrier(l2, z + rand(5, 10), Math.random() > 0.5 ? 'low' : 'high'));
+            const coinLane = [0, 1, 2].find(l => l !== l1 && l !== l2);
+            if (coinLane !== undefined) this.spawnCoinLine(coinLane, z, z + 8);
+
         } else {
-            // Coin-rich segment - open path
-            const lane = randInt(0, 2);
+            // ── Coin-rich open segment ──
+            const lane = randChoice(freeLanes);
             this.spawnCoinArc(lane, z);
-            if (Math.random() > 0.5) {
-                const otherLane = (lane + randInt(1,2)) % 3;
-                this.spawnCoinLine(otherLane, z, z + 10);
+            if (Math.random() > 0.5 && freeLanes.length >= 2) {
+                const other = freeLanes.filter(l => l !== lane);
+                this.spawnCoinLine(randChoice(other), z, z + 10);
             }
         }
 
-        // Random power-up
-        if (Math.random() < CONFIG.POWERUP_CHANCE) {
-            const types = ['magnet','multiplier','jetpack'];
-            this.powerups.push(new PowerUp(randInt(0,2), z + rand(5, 15), randChoice(types)));
+        // Random power-up on a free lane
+        if (Math.random() < CONFIG.POWERUP_CHANCE && freeLanes.length > 0) {
+            this.powerups.push(new PowerUp(randChoice(freeLanes), z + rand(5, 15), randChoice(['magnet', 'multiplier', 'jetpack'])));
         }
     }
 
@@ -648,8 +698,8 @@ class Renderer {
 
         for (let side = -1; side <= 1; side += 2) {
             for (let z = offset; z < CONFIG.DRAW_DISTANCE; z += buildingGap) {
-                const bx = side * 2.6;
-                const bw = 1.2;
+                const bx = side * 3.0;
+                const bw = 1.4;
                 const bh = 2 + (((Math.floor(z/buildingGap) * 7919 + side * 3571) % 20) / 20) * 5;
                 const color = CONFIG.BUILDING_COLORS[Math.abs(Math.floor(z/buildingGap) * 3 + side) % CONFIG.BUILDING_COLORS.length];
 
@@ -707,7 +757,7 @@ class Renderer {
         }
     }
 
-    // ---- TRAIN ----
+    // ---- TRAIN (Subway Surfers-style subway car) ----
     drawTrain(train) {
         const ctx = this.ctx;
         const { x, z, length, width, height, color } = train;
@@ -728,149 +778,306 @@ class Renderer {
         const btl = this.project(x - hw, height, zEnd);
         const btr = this.project(x + hw, height, zEnd);
 
-        // Top face
-        ctx.fillStyle = lightenColor(color, 30);
+        // ── Roof (top face) ──
+        ctx.fillStyle = lightenColor(color, 40);
         ctx.beginPath();
         ctx.moveTo(ftl.x, ftl.y); ctx.lineTo(ftr.x, ftr.y);
         ctx.lineTo(btr.x, btr.y); ctx.lineTo(btl.x, btl.y);
         ctx.closePath(); ctx.fill();
 
-        // Left side
-        ctx.fillStyle = darkenColor(color, 25);
+        // ── Left side ──
+        ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(fbl.x, fbl.y); ctx.lineTo(bbl.x, bbl.y);
         ctx.lineTo(btl.x, btl.y); ctx.lineTo(ftl.x, ftl.y);
         ctx.closePath(); ctx.fill();
 
-        // Right side
-        ctx.fillStyle = darkenColor(color, 15);
+        // ── Right side ──
+        ctx.fillStyle = darkenColor(color, 10);
         ctx.beginPath();
         ctx.moveTo(fbr.x, fbr.y); ctx.lineTo(bbr.x, bbr.y);
         ctx.lineTo(btr.x, btr.y); ctx.lineTo(ftr.x, ftr.y);
         ctx.closePath(); ctx.fill();
 
-        // Front face (if visible)
-        if (zStart < 40) {
-            ctx.fillStyle = color;
+        // ── Bottom trim / undercarriage ──
+        const trimH = height * 0.08;
+        const ltb = this.project(x - hw, 0, zStart);
+        const ltt = this.project(x - hw, trimH, zStart);
+        const ltb2 = this.project(x - hw, 0, zEnd);
+        const ltt2 = this.project(x - hw, trimH, zEnd);
+        ctx.fillStyle = darkenColor(color, 50);
+        ctx.beginPath();
+        ctx.moveTo(ltb.x, ltb.y); ctx.lineTo(ltb2.x, ltb2.y);
+        ctx.lineTo(ltt2.x, ltt2.y); ctx.lineTo(ltt.x, ltt.y);
+        ctx.closePath(); ctx.fill();
+
+        const rtb = this.project(x + hw, 0, zStart);
+        const rtt = this.project(x + hw, trimH, zStart);
+        const rtb2 = this.project(x + hw, 0, zEnd);
+        const rtt2 = this.project(x + hw, trimH, zEnd);
+        ctx.fillStyle = darkenColor(color, 60);
+        ctx.beginPath();
+        ctx.moveTo(rtb.x, rtb.y); ctx.lineTo(rtb2.x, rtb2.y);
+        ctx.lineTo(rtt2.x, rtt2.y); ctx.lineTo(rtt.x, rtt.y);
+        ctx.closePath(); ctx.fill();
+
+        // ── White stripe along the sides ──
+        const stripeY1 = height * 0.22;
+        const stripeY2 = height * 0.30;
+        for (const side of [-1, 1]) {
+            const sx = x + side * (hw + 0.01);
+            const s1 = this.project(sx, stripeY1, zStart);
+            const s2 = this.project(sx, stripeY2, zStart);
+            const s3 = this.project(sx, stripeY2, zEnd);
+            const s4 = this.project(sx, stripeY1, zEnd);
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath();
+            ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y);
+            ctx.lineTo(s3.x, s3.y); ctx.lineTo(s4.x, s4.y);
+            ctx.closePath(); ctx.fill();
+        }
+
+        // ── Side windows + doors ──
+        const doorSpacing = 4.5;
+        const winSpacing = 2.2;
+        for (let wz = zStart + 0.8; wz < zEnd - 0.5; wz += winSpacing) {
+            if (wz > CONFIG.DRAW_DISTANCE) break;
+            const isDoor = Math.abs((wz - zStart) % doorSpacing) < winSpacing * 0.6;
+            const winH1 = isDoor ? height * 0.12 : height * 0.40;
+            const winH2 = height * 0.80;
+            const winLen = isDoor ? 1.2 : 1.0;
+
+            for (const side of [-1, 1]) {
+                const wx = x + side * (hw + 0.01);
+                const w1 = this.project(wx, winH1, wz);
+                const w2 = this.project(wx, winH2, wz);
+                const w3 = this.project(wx, winH2, wz + winLen);
+                const w4 = this.project(wx, winH1, wz + winLen);
+
+                ctx.fillStyle = isDoor ? 'rgba(100,170,230,0.35)' : 'rgba(140,200,255,0.30)';
+                ctx.beginPath();
+                ctx.moveTo(w1.x, w1.y); ctx.lineTo(w2.x, w2.y);
+                ctx.lineTo(w3.x, w3.y); ctx.lineTo(w4.x, w4.y);
+                ctx.closePath(); ctx.fill();
+
+                // Window frame
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        }
+
+        // ── Graffiti patches (colored rectangles on sides) ──
+        const graffitiSeed = Math.floor(z * 17) % 100;
+        if (graffitiSeed < 40) {
+            const gColors = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#ff6fb7','#c780ff'];
+            const gColor = gColors[graffitiSeed % gColors.length];
+            const gZ = zStart + (zEnd - zStart) * 0.3;
+            const gLen = Math.min(3, (zEnd - zStart) * 0.25);
+            const gY1 = height * 0.35;
+            const gY2 = height * 0.60;
+
+            for (const side of [-1, 1]) {
+                const gx = x + side * (hw + 0.02);
+                const g1 = this.project(gx, gY1, gZ);
+                const g2 = this.project(gx, gY2, gZ);
+                const g3 = this.project(gx, gY2, gZ + gLen);
+                const g4 = this.project(gx, gY1, gZ + gLen);
+
+                ctx.fillStyle = gColor;
+                ctx.globalAlpha = 0.35;
+                ctx.beginPath();
+                ctx.moveTo(g1.x, g1.y); ctx.lineTo(g2.x, g2.y);
+                ctx.lineTo(g3.x, g3.y); ctx.lineTo(g4.x, g4.y);
+                ctx.closePath(); ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // ── Front face (only draw when close enough) ──
+        if (zStart < 50) {
+            ctx.fillStyle = darkenColor(color, 15);
             ctx.beginPath();
             ctx.moveTo(fbl.x, fbl.y); ctx.lineTo(fbr.x, fbr.y);
             ctx.lineTo(ftr.x, ftr.y); ctx.lineTo(ftl.x, ftl.y);
             ctx.closePath(); ctx.fill();
 
-            // Front window
-            const fwbl = this.project(x - hw * 0.6, height * 0.45, zStart);
-            const fwbr = this.project(x + hw * 0.6, height * 0.45, zStart);
-            const fwtl = this.project(x - hw * 0.6, height * 0.85, zStart);
-            const fwtr = this.project(x + hw * 0.6, height * 0.85, zStart);
-            ctx.fillStyle = 'rgba(150,200,255,0.4)';
+            // Front windshield
+            const fwbl = this.project(x - hw * 0.55, height * 0.45, zStart);
+            const fwbr = this.project(x + hw * 0.55, height * 0.45, zStart);
+            const fwtl = this.project(x - hw * 0.55, height * 0.82, zStart);
+            const fwtr = this.project(x + hw * 0.55, height * 0.82, zStart);
+            ctx.fillStyle = 'rgba(120,180,240,0.5)';
             ctx.beginPath();
             ctx.moveTo(fwbl.x, fwbl.y); ctx.lineTo(fwbr.x, fwbr.y);
             ctx.lineTo(fwtr.x, fwtr.y); ctx.lineTo(fwtl.x, fwtl.y);
             ctx.closePath(); ctx.fill();
+
+            // Headlights
+            if (zStart < 20) {
+                for (const lx of [x - hw * 0.7, x + hw * 0.7]) {
+                    const lp = this.project(lx, height * 0.18, zStart);
+                    const lr = Math.max(2, lp.scale * 6);
+                    ctx.fillStyle = '#ffeeaa';
+                    ctx.shadowColor = '#ffdd44';
+                    ctx.shadowBlur = lr * 3;
+                    ctx.beginPath();
+                    ctx.arc(lp.x, lp.y, lr, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                }
+            }
         }
 
-        // Side windows
-        const sideWindowSpacing = 3;
-        for (let wz = zStart + 1; wz < zEnd - 1; wz += sideWindowSpacing) {
-            if (wz > CONFIG.DRAW_DISTANCE) break;
-            const winH1 = height * 0.4;
-            const winH2 = height * 0.8;
-            const winOffset = 0.1;
-
-            // Left side windows
-            const wl1 = this.project(x - hw - winOffset, winH1, wz);
-            const wl2 = this.project(x - hw - winOffset, winH2, wz);
-            const wl3 = this.project(x - hw - winOffset, winH2, wz + 1.5);
-            const wl4 = this.project(x - hw - winOffset, winH1, wz + 1.5);
-
-            ctx.fillStyle = 'rgba(130,180,240,0.3)';
+        // ── Back face (if visible) ──
+        if (zEnd < CONFIG.DRAW_DISTANCE && zEnd > 1) {
+            ctx.fillStyle = darkenColor(color, 30);
             ctx.beginPath();
-            ctx.moveTo(wl1.x, wl1.y); ctx.lineTo(wl2.x, wl2.y);
-            ctx.lineTo(wl3.x, wl3.y); ctx.lineTo(wl4.x, wl4.y);
+            ctx.moveTo(bbl.x, bbl.y); ctx.lineTo(bbr.x, bbr.y);
+            ctx.lineTo(btr.x, btr.y); ctx.lineTo(btl.x, btl.y);
             ctx.closePath(); ctx.fill();
 
-            // Right side windows
-            const wr1 = this.project(x + hw + winOffset, winH1, wz);
-            const wr2 = this.project(x + hw + winOffset, winH2, wz);
-            const wr3 = this.project(x + hw + winOffset, winH2, wz + 1.5);
-            const wr4 = this.project(x + hw + winOffset, winH1, wz + 1.5);
-
-            ctx.beginPath();
-            ctx.moveTo(wr1.x, wr1.y); ctx.lineTo(wr2.x, wr2.y);
-            ctx.lineTo(wr3.x, wr3.y); ctx.lineTo(wr4.x, wr4.y);
-            ctx.closePath(); ctx.fill();
+            // Tail lights
+            if (zEnd < 30) {
+                for (const lx of [x - hw * 0.6, x + hw * 0.6]) {
+                    const lp = this.project(lx, height * 0.18, zEnd);
+                    const lr = Math.max(1.5, lp.scale * 4);
+                    ctx.fillStyle = '#ff3333';
+                    ctx.shadowColor = '#ff0000';
+                    ctx.shadowBlur = lr * 2;
+                    ctx.beginPath();
+                    ctx.arc(lp.x, lp.y, lr, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                }
+            }
         }
-
-        // Stripe along the side
-        const stripeY = height * 0.25;
-        const sl1 = this.project(x - hw - 0.01, stripeY, zStart);
-        const sl2 = this.project(x - hw - 0.01, stripeY + 0.15, zStart);
-        const sl3 = this.project(x - hw - 0.01, stripeY + 0.15, zEnd);
-        const sl4 = this.project(x - hw - 0.01, stripeY, zEnd);
-        ctx.fillStyle = 'rgba(255,255,255,0.15)';
-        ctx.beginPath();
-        ctx.moveTo(sl1.x, sl1.y); ctx.lineTo(sl2.x, sl2.y);
-        ctx.lineTo(sl3.x, sl3.y); ctx.lineTo(sl4.x, sl4.y);
-        ctx.closePath(); ctx.fill();
     }
 
-    // ---- BARRIER ----
+    // ---- BARRIER (Subway Surfers-style small obstacle) ----
     drawBarrier(barrier) {
         const ctx = this.ctx;
-        const { x, z, width, height, type } = barrier;
+        const { x, z, width, type } = barrier;
         const hw = width / 2;
-        const yBase = type === 'high' ? CONFIG.BARRIER_HIGH_Y : 0;
-        const yTop = type === 'high' ? CONFIG.BARRIER_HIGH_Y + 2 : height;
 
         if (z < 0.2 || z > CONFIG.DRAW_DISTANCE) return;
 
-        const bl = this.project(x - hw, yBase, z);
-        const br = this.project(x + hw, yBase, z);
-        const tl = this.project(x - hw, yTop, z);
-        const tr = this.project(x + hw, yTop, z);
-        const bl2 = this.project(x - hw, yBase, z + 0.6);
-        const br2 = this.project(x + hw, yBase, z + 0.6);
-        const tl2 = this.project(x - hw, yTop, z + 0.6);
-        const tr2 = this.project(x + hw, yTop, z + 0.6);
+        if (type === 'low') {
+            // ── LOW BARRIER: small roadblock / hurdle on the ground ──
+            const bH = CONFIG.BARRIER_HEIGHT;
+            const depth = 0.4;
 
-        // Front face - yellow/black stripes
-        const stripeCount = 5;
-        for (let i = 0; i < stripeCount; i++) {
-            const t1 = i / stripeCount;
-            const t2 = (i + 1) / stripeCount;
-            const y1 = yBase + (yTop - yBase) * t1;
-            const y2 = yBase + (yTop - yBase) * t2;
-            const p1l = this.project(x - hw, y1, z);
-            const p1r = this.project(x + hw, y1, z);
-            const p2l = this.project(x - hw, y2, z);
-            const p2r = this.project(x + hw, y2, z);
+            const fbl = this.project(x - hw, 0, z);
+            const fbr = this.project(x + hw, 0, z);
+            const ftl = this.project(x - hw, bH, z);
+            const ftr = this.project(x + hw, bH, z);
+            const bbl = this.project(x - hw, 0, z + depth);
+            const bbr = this.project(x + hw, 0, z + depth);
+            const btl = this.project(x - hw, bH, z + depth);
+            const btr = this.project(x + hw, bH, z + depth);
 
-            ctx.fillStyle = i % 2 === 0 ? CONFIG.BARRIER_COLOR : '#333';
+            // Top face
+            ctx.fillStyle = '#ff3333';
             ctx.beginPath();
-            ctx.moveTo(p1l.x, p1l.y); ctx.lineTo(p1r.x, p1r.y);
-            ctx.lineTo(p2r.x, p2r.y); ctx.lineTo(p2l.x, p2l.y);
+            ctx.moveTo(ftl.x, ftl.y); ctx.lineTo(ftr.x, ftr.y);
+            ctx.lineTo(btr.x, btr.y); ctx.lineTo(btl.x, btl.y);
             ctx.closePath(); ctx.fill();
-        }
 
-        // Top face
-        ctx.fillStyle = CONFIG.BARRIER_COLOR;
-        ctx.beginPath();
-        ctx.moveTo(tl.x, tl.y); ctx.lineTo(tr.x, tr.y);
-        ctx.lineTo(tr2.x, tr2.y); ctx.lineTo(tl2.x, tl2.y);
-        ctx.closePath(); ctx.fill();
+            // Front face - red with white stripe
+            ctx.fillStyle = '#cc2222';
+            ctx.beginPath();
+            ctx.moveTo(fbl.x, fbl.y); ctx.lineTo(fbr.x, fbr.y);
+            ctx.lineTo(ftr.x, ftr.y); ctx.lineTo(ftl.x, ftl.y);
+            ctx.closePath(); ctx.fill();
 
-        // Posts on sides
-        if (type === 'high') {
-            for (const px of [x - hw, x + hw]) {
-                const postB = this.project(px, 0, z);
-                const postT = this.project(px, yBase, z);
-                ctx.strokeStyle = '#888';
-                ctx.lineWidth = Math.max(1, postB.scale * 4);
+            // White stripe on front
+            const s1 = this.project(x - hw, bH * 0.35, z);
+            const s2 = this.project(x + hw, bH * 0.35, z);
+            const s3 = this.project(x + hw, bH * 0.65, z);
+            const s4 = this.project(x - hw, bH * 0.65, z);
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y);
+            ctx.lineTo(s3.x, s3.y); ctx.lineTo(s4.x, s4.y);
+            ctx.closePath(); ctx.fill();
+
+            // Side face
+            ctx.fillStyle = '#aa1a1a';
+            ctx.beginPath();
+            ctx.moveTo(fbr.x, fbr.y); ctx.lineTo(bbr.x, bbr.y);
+            ctx.lineTo(btr.x, btr.y); ctx.lineTo(ftr.x, ftr.y);
+            ctx.closePath(); ctx.fill();
+
+        } else {
+            // ── HIGH BARRIER: overhead sign/beam on two posts ──
+            // You must slide under the beam
+            const beamY = CONFIG.BARRIER_HIGH_Y;
+            const beamTop = beamY + 0.6;
+            const postW = 0.06;
+            const depth = 0.3;
+
+            // Left post (ground to beam)
+            const lpB = this.project(x - hw + postW, 0, z);
+            const lpT = this.project(x - hw + postW, beamY, z);
+            ctx.strokeStyle = '#888888';
+            ctx.lineWidth = Math.max(2, lpB.scale * 5);
+            ctx.beginPath();
+            ctx.moveTo(lpB.x, lpB.y);
+            ctx.lineTo(lpT.x, lpT.y);
+            ctx.stroke();
+
+            // Right post
+            const rpB = this.project(x + hw - postW, 0, z);
+            const rpT = this.project(x + hw - postW, beamY, z);
+            ctx.beginPath();
+            ctx.moveTo(rpB.x, rpB.y);
+            ctx.lineTo(rpT.x, rpT.y);
+            ctx.stroke();
+
+            // Beam (the part you must slide under)
+            const bfbl = this.project(x - hw, beamY, z);
+            const bfbr = this.project(x + hw, beamY, z);
+            const bftl = this.project(x - hw, beamTop, z);
+            const bftr = this.project(x + hw, beamTop, z);
+            const bbbl = this.project(x - hw, beamY, z + depth);
+            const bbbr = this.project(x + hw, beamY, z + depth);
+            const bbtl = this.project(x - hw, beamTop, z + depth);
+            const bbtr = this.project(x + hw, beamTop, z + depth);
+
+            // Beam top
+            ctx.fillStyle = '#ffcc00';
+            ctx.beginPath();
+            ctx.moveTo(bftl.x, bftl.y); ctx.lineTo(bftr.x, bftr.y);
+            ctx.lineTo(bbtr.x, bbtr.y); ctx.lineTo(bbtl.x, bbtl.y);
+            ctx.closePath(); ctx.fill();
+
+            // Beam front - yellow/black warning stripes
+            const stripes = 4;
+            for (let i = 0; i < stripes; i++) {
+                const t1 = i / stripes;
+                const t2 = (i + 1) / stripes;
+                const lx1 = x - hw + (width) * t1;
+                const lx2 = x - hw + (width) * t2;
+                const p1t = this.project(lx1, beamTop, z);
+                const p2t = this.project(lx2, beamTop, z);
+                const p1b = this.project(lx1, beamY, z);
+                const p2b = this.project(lx2, beamY, z);
+
+                ctx.fillStyle = i % 2 === 0 ? '#ffcc00' : '#222222';
                 ctx.beginPath();
-                ctx.moveTo(postB.x, postB.y);
-                ctx.lineTo(postT.x, postT.y);
-                ctx.stroke();
+                ctx.moveTo(p1t.x, p1t.y); ctx.lineTo(p2t.x, p2t.y);
+                ctx.lineTo(p2b.x, p2b.y); ctx.lineTo(p1b.x, p1b.y);
+                ctx.closePath(); ctx.fill();
             }
+
+            // Beam side
+            ctx.fillStyle = '#cc9900';
+            ctx.beginPath();
+            ctx.moveTo(bfbr.x, bfbr.y); ctx.lineTo(bbbr.x, bbbr.y);
+            ctx.lineTo(bbtr.x, bbtr.y); ctx.lineTo(bftr.x, bftr.y);
+            ctx.closePath(); ctx.fill();
         }
     }
 
@@ -955,9 +1162,9 @@ class Renderer {
     drawPlayer(player, character, time) {
         const ctx = this.ctx;
         const p = this.project(player.x, player.y, 2);
-        const scale = p.scale * 1.1;
+        const scale = p.scale * 1.4;
         const h = this.unitH * scale;
-        const w = this.roadHW * 0.35 * scale;
+        const w = this.roadHW * 0.32 * scale;
 
         // Character colors
         const ch = character;
