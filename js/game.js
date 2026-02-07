@@ -92,7 +92,9 @@ function randChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function lightenColor(hex, amt) {
     let r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-    r = Math.min(255, r + amt); g = Math.min(255, g + amt); b = Math.min(255, b + amt);
+    r = Math.max(0, Math.min(255, r + amt));
+    g = Math.max(0, Math.min(255, g + amt));
+    b = Math.max(0, Math.min(255, b + amt));
     return '#' + [r,g,b].map(c => c.toString(16).padStart(2,'0')).join('');
 }
 function darkenColor(hex, amt) { return lightenColor(hex, -amt); }
@@ -1268,6 +1270,7 @@ class Game {
 
         this.notification = '';
         this.notificationTimer = 0;
+        this.shakeTime = 0;
 
         // Persistence
         this.highScore = parseInt(localStorage.getItem('ss_highscore') || '0');
@@ -1302,6 +1305,7 @@ class Game {
         this.scrollOffset = 0;
         this.notification = '';
         this.notificationTimer = 0;
+        this.shakeTime = 0;
         this.player.reset();
         this.world.reset();
         this.particles.clear();
@@ -1588,12 +1592,13 @@ class UIController {
     setupButtons() {
         // Play button
         document.getElementById('play-btn').addEventListener('click', () => {
+            const showTutorial = this.game.firstGame;
             this.game.startGame();
             this.showScreen('game-hud');
 
             // Show tutorial for first game
             const tut = document.getElementById('swipe-tutorial');
-            if (this.game.firstGame || !localStorage.getItem('ss_played')) {
+            if (showTutorial) {
                 tut.style.display = 'flex';
                 setTimeout(() => { tut.style.display = 'none'; }, 4500);
             } else {
